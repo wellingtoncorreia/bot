@@ -7,15 +7,13 @@ export async function GET(req: Request) {
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
-  console.log('🔐 VERIFICAÇÃO WEBHOOK');
-  console.log('Mode:', mode);
-  console.log('Token recebido:', token ? 'SIM' : 'NÃO');
+  console.log('🔐 VERIFICAÇÃO DO WEBHOOK');
 
   if (
     mode === 'subscribe' &&
     token === process.env.WEBHOOK_VERIFY_TOKEN
   ) {
-    console.log('✅ Webhook verificado');
+    console.log('✅ Webhook verificado com sucesso');
 
     return new Response(challenge, {
       status: 200,
@@ -29,7 +27,6 @@ export async function GET(req: Request) {
   });
 }
 
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -42,7 +39,7 @@ export async function POST(req: Request) {
     const message =
       body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-    // Eventos que não são mensagens podem chegar pelo webhook.
+    // Eventos sem mensagem, como alguns eventos de status
     if (!message) {
       console.log('ℹ️ Evento recebido sem mensagem');
 
@@ -54,6 +51,7 @@ export async function POST(req: Request) {
 
     console.log('📨 Mensagem encontrada:', message);
 
+    // Neste momento vamos trabalhar apenas com mensagens de texto
     if (message.type !== 'text') {
       console.log(
         'ℹ️ Tipo de mensagem não suportado:',
@@ -69,63 +67,74 @@ export async function POST(req: Request) {
     const from = message.from;
     const textReceived = message.text?.body;
 
-    console.log('👤 De:', from);
-    console.log('💬 Mensagem:', textReceived);
+    console.log('👤 Remetente:', from);
+    console.log('💬 Mensagem recebida:', textReceived);
 
     const phoneNumberId = process.env.PHONE_NUMBER_ID;
     const whatsappToken = process.env.WHATSAPP_TOKEN;
 
+    // Verifica variáveis de ambiente
     if (!phoneNumberId) {
       console.error('❌ PHONE_NUMBER_ID não configurado');
+
       return NextResponse.json(
-        { error: 'PHONE_NUMBER_ID não configurado' },
+        {
+          error: 'PHONE_NUMBER_ID não configurado',
+        },
         { status: 500 }
       );
     }
 
     if (!whatsappToken) {
       console.error('❌ WHATSAPP_TOKEN não configurado');
+
       return NextResponse.json(
-        { error: 'WHATSAPP_TOKEN não configurado' },
+        {
+          error: 'WHATSAPP_TOKEN não configurado',
+        },
         { status: 500 }
       );
     }
 
     console.log('📤 Enviando resposta para:', from);
 
-  const response = await fetch(
-  `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/messages`,
-  {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp',
-      to: from,
-      type: 'text',
-      text: {
-        body: `🤖 Recebi sua mensagem: "${textReceived}"`,
-      },
-    }),
-  }
-);
+    const response = await fetch(
+      `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
 
-const responseText = await response.text();
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+        },
 
-console.log('📡 STATUS META:', response.status);
-console.log('📡 RESPOSTA META:', responseText);
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: from,
+          type: 'text',
+          text: {
+            preview_url: false,
+            body: `🤖 Bot Next.js: Recebi sua mensagem "${textReceived}"!`,
+          },
+        }),
+      }
+    );
 
-if (!response.ok) {
-  throw new Error(
-    `WhatsApp API ${response.status}: ${responseText}`
-  );
-}
+    const responseText = await response.text();
+
+    console.log('📡 STATUS META:', response.status);
+    console.log('📡 RESPOSTA META:', responseText);
+
+    // Se a Meta retornar erro
+    if (!response.ok) {
+      console.error(
+        '❌ ERRO AO ENVIAR MENSAGEM PELO WHATSAPP'
+      );
 
       return NextResponse.json(
         {
-          error: 'Erro ao enviar mensagem',
+          error: 'Erro ao enviar mensagem para o WhatsApp',
           status: response.status,
           meta: responseText,
         },
@@ -142,7 +151,6 @@ if (!response.ok) {
       },
       { status: 200 }
     );
-
   } catch (error) {
     console.error('🔥 ERRO NO WEBHOOK:', error);
 
