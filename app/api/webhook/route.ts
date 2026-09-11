@@ -93,36 +93,35 @@ export async function POST(req: Request) {
 
     console.log('📤 Enviando resposta para:', from);
 
-    const response = await fetch(
-      `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`,
-      {
-        method: 'POST',
+  const response = await fetch(
+  `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/messages`,
+  {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: from,
+      type: 'text',
+      text: {
+        body: `🤖 Recebi sua mensagem: "${textReceived}"`,
+      },
+    }),
+  }
+);
 
-        headers: {
-          Authorization: `Bearer ${whatsappToken}`,
-          'Content-Type': 'application/json',
-        },
+const responseText = await response.text();
 
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: from,
-          type: 'text',
-          text: {
-            body: `🤖 Bot Next.js: Recebi sua mensagem "${textReceived}"!`,
-          },
-        }),
-      }
-    );
+console.log('📡 STATUS META:', response.status);
+console.log('📡 RESPOSTA META:', responseText);
 
-    const responseText = await response.text();
-
-    console.log('📡 STATUS META:', response.status);
-    console.log('📡 RESPOSTA META:', responseText);
-
-    if (!response.ok) {
-      console.error(
-        '❌ ERRO AO ENVIAR MENSAGEM PELO WHATSAPP'
-      );
+if (!response.ok) {
+  throw new Error(
+    `WhatsApp API ${response.status}: ${responseText}`
+  );
+}
 
       return NextResponse.json(
         {
