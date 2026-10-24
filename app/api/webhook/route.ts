@@ -2,84 +2,163 @@ import { NextResponse } from 'next/server';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
-  if (mode === 'subscribe' && token === process.env.WEBHOOK_VERIFY_TOKEN) {
-    return new Response(challenge, { status: 200 });
+  console.log('🔐 VERIFICAÇÃO DO WEBHOOK');
+
+  if (
+    mode === 'subscribe' &&
+    token === process.env.WEBHOOK_VERIFY_TOKEN
+  ) {
+    console.log('✅ Webhook verificado com sucesso');
+
+    return new Response(challenge, {
+      status: 200,
+    });
   }
-  return new Response('Token inválido', { status: 403 });
+
+  console.error('❌ Token de verificação inválido');
+
+  return new Response('Token inválido', {
+    status: 403,
+  });
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    
-    // Log para depuração na Vercel
-    console.log('📬 RECEBIDO DO WHATSAPP:', JSON.stringify(body, null, 2));
 
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    console.log(
+      '📬 RECEBIDO DO WHATSAPP:',
+      JSON.stringify(body, null, 2)
+    );
 
-    if (message && message.type === 'text') {
-      const from = message.from;
-      const textReceived = message.text.body;
+    const message =
+      body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
-      // =========================================================
-      // INTEGRAÇÃO COM WHATSAPP (META CLOUD API)
-      // =========================================================
-      const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-      const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+    // Eventos sem mensagem, como alguns eventos de status
+    if (!message) {
+      console.log('ℹ️ Evento recebido sem mensagem');
 
-      if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-        throw new Error('Faltam variáveis de ambiente do WhatsApp.');
-      }
+      return NextResponse.json(
+        { status: 'ignored' },
+        { status: 200 }
+      );
+    }
 
-      const response = await fetch(
-        `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            recipient_type: 'individual', // Declarar explicitamente
-            to: from,
-            type: 'text', // Declarar explicitamente
-            text: { body: `🤖 Bot Next.js: Recebi sua mensagem "${textReceived}"!` },
-          }),
-        }
+    console.log('📨 Mensagem encontrada:', message);
+
+    // Neste momento vamos trabalhar apenas com mensagens de texto
+    if (message.type !== 'text') {
+      console.log(
+        'ℹ️ Tipo de mensagem não suportado:',
+        message.type
       );
 
-      const resData = await response.json();
+      return NextResponse.json(
+        { status: 'ignored' },
+        { status: 200 }
+      );
+    }
 
-      // O fetch não cai no catch automaticamente em erros HTTP (400, 500)
-      // Forçamos o erro para cair no catch e manter o padrão de tratamento
-      if (!response.ok) {
-        throw resData; 
+    const from = message.from;
+    const textReceived = message.text?.body;
+
+    console.log('👤 Remetente:', from);
+    console.log('💬 Mensagem recebida:', textReceived);
+
+    const phoneNumberId = process.env.PHONE_NUMBER_ID;
+    const whatsappToken = process.env.WHATSAPP_TOKEN;
+
+    // Verifica variáveis de ambiente
+    if (!phoneNumberId) {
+      console.error('❌ PHONE_NUMBER_ID não configurado');
+
+      return NextResponse.json(
+        {
+          error: 'PHONE_NUMBER_ID não configurado',
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!whatsappToken) {
+      console.error('❌ WHATSAPP_TOKEN não configurado');
+
+      return NextResponse.json(
+        {
+          error: 'WHATSAPP_TOKEN não configurado',
+        },
+        { status: 500 }
+      );
+    }
+
+    console.log('📤 Enviando resposta para:', from);
+
+    const response = await fetch(
+      `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`,
+      {
+        method: 'POST',
+
+        headers: {
+          Authorization: `Bearer ${whatsappToken}`,
+          'Content-Type': 'application/json',
+        },
+
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: from,
+          type: 'text',
+          text: {
+            preview_url: false,
+            body: `🤖 Bot Next.js: Recebi sua mensagem "${textReceived}"!`,
+          },
+        }),
       }
+    );
 
-      console.log('✅ Mensagem enviada com sucesso ao WhatsApp!', resData);
+    const responseText = await response.text();
+
+    console.log('📡 STATUS META:', response.status);
+    console.log('📡 RESPOSTA META:', responseText);
+
+    // Se a Meta retornar erro
+    if (!response.ok) {
+      console.error(
+        '❌ ERRO AO ENVIAR MENSAGEM PELO WHATSAPP'
+      );
+
+      return NextResponse.json(
+        {
+          error: 'Erro ao enviar mensagem para o WhatsApp',
+          status: response.status,
+          meta: responseText,
+        },
+        { status: 500 }
+      );
     }
 
-    // A Meta exige sempre um status 200 rápido para não reenviar o webhook
-    return NextResponse.json({ status: 'success' }, { status: 200 });
+    console.log('✅ MENSAGEM ENVIADA COM SUCESSO');
 
-  } catch (error: any) {
-    // Captura o erro exato da Meta (adaptado para o fetch)
-    const detalhesErro = error.error || error.message || error;
-    console.error('❌ Erro na API do WhatsApp:', JSON.stringify(detalhesErro, null, 2));
+    return NextResponse.json(
+      {
+        status: 'success',
+        whatsapp: responseText,
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error('🔥 ERRO NO WEBHOOK:', error);
 
-    // Tratamento elegante para a Janela de 24 horas (Erro 131047)
-    if (detalhesErro?.code === 131047) {
-      console.error('Aviso: O destinatário precisa enviar uma mensagem para o bot no WhatsApp para liberar a conversa.');
-    }
-
-    return NextResponse.json({ 
-      error: 'Erro na integração com WhatsApp',
-      detalhes: detalhesErro 
-    }, { status: 500 }); 
+    return NextResponse.json(
+      {
+        error: 'Erro interno',
+      },
+      { status: 500 }
+    );
   }
 }
