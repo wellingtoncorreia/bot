@@ -80,6 +80,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ 
       error: 'Erro na integração com WhatsApp',
       detalhes: detalhesErro 
-    }, { status: 500 }); 
+    }, { status: 200 }); 
   }
 }
